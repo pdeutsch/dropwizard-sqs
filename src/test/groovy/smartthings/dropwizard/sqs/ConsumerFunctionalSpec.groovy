@@ -3,6 +3,8 @@ package smartthings.dropwizard.sqs
 import com.amazonaws.services.sns.model.PublishRequest
 import com.amazonaws.services.sns.model.PublishResult
 import com.amazonaws.services.sqs.model.Message
+import com.amazonaws.services.sqs.model.SendMessageRequest
+import com.amazonaws.services.sqs.model.SendMessageResult
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.google.inject.Inject
@@ -11,6 +13,8 @@ import io.dropwizard.Application
 import io.dropwizard.Configuration
 import io.dropwizard.setup.Environment
 import io.dropwizard.testing.junit.DropwizardAppRule
+import smartthings.dropwizard.sqs.internal.consumer.SqsManager
+
 import java.util.concurrent.atomic.AtomicInteger
 import javax.ws.rs.POST
 import javax.ws.rs.Path
@@ -43,12 +47,16 @@ class ConsumerFunctionalSpec extends Specification {
     @Shared
     TestConsumer consumer = new TestConsumer(objectMapper)
 
+    @Shared
+    TestQueueConsumer queueConsumer = new TestQueueConsumer(objectMapper)
+
     @ClassRule
     @Shared
     DropwizardAppRule<TestConfiguration> app = new DropwizardAppRule<>(
         TestApplication,
         new TestConfiguration(
             consumer: consumer,
+            queueConsumer: queueConsumer,
             aws: new AwsModule.Config(
                 awsAccessKey: '<access-key>',
                 awsSecretKey: '<secret-key>'
@@ -74,7 +82,23 @@ class ConsumerFunctionalSpec extends Specification {
                                 endpoint: awsEndpointUrl
                             )
                         ]
+                    ),
+                    new SqsModule.ConsumerConfig(
+                        consumer: TestQueueConsumer,
+                        endpoints: [
+                            new SqsModule.EndpointConfig(
+                                queueName: 'simple_test_queue',
+                                regionName: 'us-east-1',
+                                endpoint: awsEndpointUrl
+                            )
+                        ]
                     )
+                ],
+                producers: [
+                    'producer1': new SqsModule.EndpointConfig(
+                        queueName: 'simple_test_queue',
+                        regionName: 'us-east-1',
+                        endpoint: awsEndpointUrl)
                 ]
             )
         )
@@ -97,6 +121,26 @@ class ConsumerFunctionalSpec extends Specification {
         response.statusCode == 200
         conditions.within(5) {
             consumer.callCount(request) == 1
+        }
+    }
+
+    void 'it should publish and consume a message using Producer'() {
+        given:
+        PollingConditions conditions = new PollingConditions()
+        TestMessage request = new TestMessage(message: UUID.randomUUID())
+
+        when:
+        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/producerPublish")
+                .setHeader('Accept', 'application/json')
+                .setHeader('Content-Type', 'application/json')
+                .setBody(objectMapper.writeValueAsString(request))
+                .execute()
+                .get()
+
+        then:
+        response.statusCode == 200
+        conditions.within(5) {
+            queueConsumer.callCount(request) == 1
         }
     }
 
@@ -224,6 +268,40 @@ class TestConsumer implements Consumer {
     }
 }
 
+// used to consume simple queue messages (no topics)
+class TestQueueConsumer implements Consumer {
+    ObjectMapper mapper
+    Map<TestMessage, AtomicInteger> messages = [:]
+    java.util.function.Consumer<Message> consumer = { }
+
+    TestQueueConsumer(ObjectMapper mapper) {
+        this.mapper = mapper
+    }
+
+    @Override
+    void consume(Message message) throws Exception {
+        Object obj = message.body
+        TestMessage testMessage = mapper.readValue(message.body as String, TestMessage)
+
+        if (testMessage != null) {
+            if (messages.containsKey(testMessage)) {
+                messages.get(testMessage).incrementAndGet()
+            } else {
+                messages.put(testMessage, new AtomicInteger(1))
+            }
+            consumer.accept(message)
+        }
+    }
+
+    int callCount(TestMessage message) {
+        return messages.get(message)?.get() ?: 0
+    }
+
+    void setConsumer(java.util.function.Consumer<Message> consumer) {
+        this.consumer = consumer
+    }
+}
+
 class TestApplication extends Application<TestConfiguration> {
     @Override
     void run(TestConfiguration configuration, Environment environment) throws Exception {
@@ -235,6 +313,8 @@ class TestApplication extends Application<TestConfiguration> {
 
 class TestConfiguration extends Configuration {
     TestConsumer consumer
+    TestQueueConsumer queueConsumer
+
     AwsModule.Config aws
     SnsModule.Config sns
     SqsModule.Config sqs
@@ -254,6 +334,7 @@ class TestModule extends AbstractDwModule {
         bind(SnsModule.Config).toInstance(config.sns)
         bind(SqsModule.Config).toInstance(config.sqs)
         bind(TestConsumer).toInstance(config.consumer)
+        bind(TestQueueConsumer).toInstance(config.queueConsumer)
 
         install(new AwsModule())
         install(new SnsModule())
@@ -269,16 +350,29 @@ class TestScopeResource implements WebResource {
     private final ObjectMapper objectMapper
     private final SnsService snsService
     private final ConsumerManager consumerManager
+    private final SqsManager sqsManager
+    private final TestConfiguration config
 
     @Inject
     TestScopeResource(
         SnsService snsService,
         ConsumerManager consumerManager,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        SqsManager sqsManager,
+        TestConfiguration testConfiguration
     ) {
         this.snsService = snsService
         this.consumerManager = consumerManager
         this.objectMapper = objectMapper
+        this.sqsManager = sqsManager
+        this.config = config
+    }
+
+    @POST
+    @Path('/producerPublish')
+    SendMessageResult methodProducerPublish(TestMessage request) {
+        Producer producer = sqsManager.getProducer('producer1')
+        return producer.sendMessage(objectMapper.writeValueAsString(request))
     }
 
     @POST

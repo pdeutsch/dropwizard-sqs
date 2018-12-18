@@ -6,9 +6,7 @@ import smartthings.dropwizard.sqs.internal.consumer.SqsManager;
 import smartthings.dropwizard.sqs.internal.providers.DefaultAmazonSQSProvider;
 import smartthings.dw.guice.AbstractDwModule;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 /**
  * Guice module bindings for the Dropwizard SQS library.
@@ -32,6 +30,7 @@ public class SqsModule extends AbstractDwModule {
     public static class Config {
         private boolean enabled;
         private List<ConsumerConfig> consumers = Collections.emptyList();
+        private Map<String, EndpointConfig> producers = Collections.emptyMap();
 
         public boolean isEnabled() {
             return enabled;
@@ -48,6 +47,12 @@ public class SqsModule extends AbstractDwModule {
         public void setConsumers(List<ConsumerConfig> consumers) {
             this.consumers = consumers;
         }
+
+        public Map<String, EndpointConfig> getProducers() { return producers; }
+
+        public EndpointConfig getProducerEndpointConfig(String name) { return producers.get(name); }
+
+        public void setProducers(Map<String, EndpointConfig> producers) { this.producers = producers; }
     }
 
     public static class ConsumerConfig {

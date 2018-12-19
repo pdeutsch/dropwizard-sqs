@@ -50,7 +50,8 @@ public class SqsManager implements Managed {
                                 createService(entry.getValue());
                         if (service != null) {
                             GetQueueUrlResult result = service.getQueueUrl(endpointConfig.getQueueName());
-                            sqsProducerMap.put(producerName, new DefaultProducer(result.getQueueUrl(), service));
+                            sqsProducerMap.put(producerName,
+                                    new DefaultProducer(result.getQueueUrl(), sqsProvider.get(endpointConfig)));
                         }
                     });
         } else {

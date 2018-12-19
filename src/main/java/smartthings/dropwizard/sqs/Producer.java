@@ -1,9 +1,14 @@
 package smartthings.dropwizard.sqs;
 
+import com.amazonaws.services.sqs.model.MessageAttributeValue;
 import com.amazonaws.services.sqs.model.SendMessageResult;
 
-public interface Producer {
-    public SendMessageResult sendMessage(String messageBody);
+import java.util.Map;
 
-    public SendMessageResult sendMessage(String messageBody, int delaySeconds);
+public interface Producer {
+    SendMessageResult sendMessage(String messageBody);
+
+    SendMessageResult sendMessage(String messageBody, Integer delaySeconds);
+
+    SendMessageResult sendMessage(String messageBody, Integer delaySeconds, Map<String, MessageAttributeValue> attributeValueMap);
 }

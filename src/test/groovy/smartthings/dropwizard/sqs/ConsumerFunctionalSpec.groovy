@@ -3,7 +3,7 @@ package smartthings.dropwizard.sqs
 import com.amazonaws.services.sns.model.PublishRequest
 import com.amazonaws.services.sns.model.PublishResult
 import com.amazonaws.services.sqs.model.Message
-import com.amazonaws.services.sqs.model.SendMessageRequest
+import com.amazonaws.services.sqs.model.MessageAttributeValue
 import com.amazonaws.services.sqs.model.SendMessageResult
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -13,11 +13,7 @@ import io.dropwizard.Application
 import io.dropwizard.Configuration
 import io.dropwizard.setup.Environment
 import io.dropwizard.testing.junit.DropwizardAppRule
-import smartthings.dropwizard.sqs.internal.consumer.SqsManager
-
-import java.util.concurrent.atomic.AtomicInteger
-import javax.ws.rs.POST
-import javax.ws.rs.Path
+import org.apache.commons.lang3.StringUtils
 import org.asynchttpclient.AsyncHttpClient
 import org.asynchttpclient.DefaultAsyncHttpClient
 import org.asynchttpclient.Response
@@ -26,12 +22,17 @@ import smartthings.dropwizard.aws.AwsModule
 import smartthings.dropwizard.sns.SnsModule
 import smartthings.dropwizard.sns.SnsService
 import smartthings.dropwizard.sqs.internal.consumer.ConsumerManager
+import smartthings.dropwizard.sqs.internal.consumer.SqsManager
 import smartthings.dw.guice.AbstractDwModule
 import smartthings.dw.guice.DwGuice
 import smartthings.dw.guice.WebResource
 import spock.lang.Shared
 import spock.lang.Specification
 import spock.util.concurrent.PollingConditions
+
+import javax.ws.rs.POST
+import javax.ws.rs.Path
+import java.util.concurrent.atomic.AtomicInteger
 
 class ConsumerFunctionalSpec extends Specification {
 
@@ -47,16 +48,12 @@ class ConsumerFunctionalSpec extends Specification {
     @Shared
     TestConsumer consumer = new TestConsumer(objectMapper)
 
-    @Shared
-    TestQueueConsumer queueConsumer = new TestQueueConsumer(objectMapper)
-
     @ClassRule
     @Shared
     DropwizardAppRule<TestConfiguration> app = new DropwizardAppRule<>(
         TestApplication,
         new TestConfiguration(
             consumer: consumer,
-            queueConsumer: queueConsumer,
             aws: new AwsModule.Config(
                 awsAccessKey: '<access-key>',
                 awsSecretKey: '<secret-key>'
@@ -84,7 +81,7 @@ class ConsumerFunctionalSpec extends Specification {
                         ]
                     ),
                     new SqsModule.ConsumerConfig(
-                        consumer: TestQueueConsumer,
+                        consumer: TestConsumer,
                         endpoints: [
                             new SqsModule.EndpointConfig(
                                 queueName: 'simple_test_queue',
@@ -124,6 +121,7 @@ class ConsumerFunctionalSpec extends Specification {
         }
     }
 
+    // this test will use a simple queue publish, not using SNS
     void 'it should publish and consume a message using Producer'() {
         given:
         PollingConditions conditions = new PollingConditions()
@@ -140,7 +138,50 @@ class ConsumerFunctionalSpec extends Specification {
         then:
         response.statusCode == 200
         conditions.within(5) {
-            queueConsumer.callCount(request) == 1
+            consumer.callCount(request) == 1
+        }
+    }
+
+    // this test will use a simple queue publish with delay, not using SNS
+    // note that it does not appear that pafortin/goaws docker container implements the delay feature
+    void 'it should publish and consume a message using Producer with delay'() {
+        given:
+        PollingConditions conditions = new PollingConditions(timeout: 10)
+        TestMessage request = new TestMessage(message: UUID.randomUUID())
+
+        when:
+        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/producerPublishDelay")
+                .setHeader('Accept', 'application/json')
+                .setHeader('Content-Type', 'application/json')
+                .setBody(objectMapper.writeValueAsString(request))
+                .execute()
+                .get()
+
+        then:
+        response.statusCode == 200
+        conditions.within(8) {
+            assert consumer.callCount(request) == 1
+        }
+    }
+
+    // this test will use a simple queue publish with MessageAttributes, not using SNS
+    void 'it should publish and consume a message using Producer with attributes'() {
+        given:
+        PollingConditions conditions = new PollingConditions()
+        TestMessage request = new TestMessage(message: UUID.randomUUID())
+
+        when:
+        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/producerPublishAttributes")
+                .setHeader('Accept', 'application/json')
+                .setHeader('Content-Type', 'application/json')
+                .setBody(objectMapper.writeValueAsString(request))
+                .execute()
+                .get()
+
+        then:
+        response.statusCode == 200
+        conditions.within(5) {
+            assert consumer.callCount(request) == 1
         }
     }
 
@@ -249,48 +290,20 @@ class TestConsumer implements Consumer {
 
     @Override
     void consume(Message message) throws Exception {
-        Map body = mapper.readValue(message.body, new TypeReference<Map<String, Object>>() { })
-        TestMessage testMessage = mapper.readValue(body['Message'] as String, TestMessage)
+        // messages consumed from a simple queue publish do not contain the SNS attributes
+        TestMessage testMessage
+        if (StringUtils.contains(message.body, "\"TopicArn\"")) {
+            Map body = mapper.readValue(message.body, new TypeReference<Map<String, Object>>() { })
+            testMessage = mapper.readValue(body['Message'] as String, TestMessage)
+        } else {
+            testMessage = mapper.readValue(message.body as String, TestMessage)
+        }
         if (messages.containsKey(testMessage)) {
             messages.get(testMessage).incrementAndGet()
         } else {
             messages.put(testMessage, new AtomicInteger(1))
         }
         consumer.accept(message)
-    }
-
-    int callCount(TestMessage message) {
-        return messages.get(message)?.get() ?: 0
-    }
-
-    void setConsumer(java.util.function.Consumer<Message> consumer) {
-        this.consumer = consumer
-    }
-}
-
-// used to consume simple queue messages (no topics)
-class TestQueueConsumer implements Consumer {
-    ObjectMapper mapper
-    Map<TestMessage, AtomicInteger> messages = [:]
-    java.util.function.Consumer<Message> consumer = { }
-
-    TestQueueConsumer(ObjectMapper mapper) {
-        this.mapper = mapper
-    }
-
-    @Override
-    void consume(Message message) throws Exception {
-        Object obj = message.body
-        TestMessage testMessage = mapper.readValue(message.body as String, TestMessage)
-
-        if (testMessage != null) {
-            if (messages.containsKey(testMessage)) {
-                messages.get(testMessage).incrementAndGet()
-            } else {
-                messages.put(testMessage, new AtomicInteger(1))
-            }
-            consumer.accept(message)
-        }
     }
 
     int callCount(TestMessage message) {
@@ -313,7 +326,6 @@ class TestApplication extends Application<TestConfiguration> {
 
 class TestConfiguration extends Configuration {
     TestConsumer consumer
-    TestQueueConsumer queueConsumer
 
     AwsModule.Config aws
     SnsModule.Config sns
@@ -334,7 +346,6 @@ class TestModule extends AbstractDwModule {
         bind(SnsModule.Config).toInstance(config.sns)
         bind(SqsModule.Config).toInstance(config.sqs)
         bind(TestConsumer).toInstance(config.consumer)
-        bind(TestQueueConsumer).toInstance(config.queueConsumer)
 
         install(new AwsModule())
         install(new SnsModule())
@@ -351,21 +362,18 @@ class TestScopeResource implements WebResource {
     private final SnsService snsService
     private final ConsumerManager consumerManager
     private final SqsManager sqsManager
-    private final TestConfiguration config
 
     @Inject
     TestScopeResource(
         SnsService snsService,
         ConsumerManager consumerManager,
         ObjectMapper objectMapper,
-        SqsManager sqsManager,
-        TestConfiguration testConfiguration
+        SqsManager sqsManager
     ) {
         this.snsService = snsService
         this.consumerManager = consumerManager
         this.objectMapper = objectMapper
         this.sqsManager = sqsManager
-        this.config = config
     }
 
     @POST
@@ -373,6 +381,23 @@ class TestScopeResource implements WebResource {
     SendMessageResult methodProducerPublish(TestMessage request) {
         Producer producer = sqsManager.getProducer('producer1')
         return producer.sendMessage(objectMapper.writeValueAsString(request))
+    }
+
+    @POST
+    @Path('/producerPublishDelay')
+    SendMessageResult methodProducerPublishDelay(TestMessage request) {
+        Producer producer = sqsManager.getProducer('producer1')
+        return producer.sendMessage(objectMapper.writeValueAsString(request), 5)
+    }
+
+    @POST
+    @Path('/producerPublishAttributes')
+    SendMessageResult methodProducerPublishAttributes(TestMessage request) {
+        Producer producer = sqsManager.getProducer('producer1')
+        Map<String, MessageAttributeValue> attributeValueMap = new HashMap<>();
+        attributeValueMap.put("testAttr",
+                new MessageAttributeValue().withDataType("String").withStringValue("test value"));
+        return producer.sendMessage(objectMapper.writeValueAsString(request), null, attributeValueMap)
     }
 
     @POST

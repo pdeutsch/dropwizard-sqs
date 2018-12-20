@@ -30,7 +30,7 @@ public class SqsModule extends AbstractDwModule {
     public static class Config {
         private boolean enabled;
         private List<ConsumerConfig> consumers = Collections.emptyList();
-        private Map<String, EndpointConfig> producers = Collections.emptyMap();
+        private Map<String, EndpointConfig> queueWriters = Collections.emptyMap();
 
         public boolean isEnabled() {
             return enabled;
@@ -48,11 +48,11 @@ public class SqsModule extends AbstractDwModule {
             this.consumers = consumers;
         }
 
-        public Map<String, EndpointConfig> getProducers() { return producers; }
+        public Map<String, EndpointConfig> getQueueWriters() { return queueWriters; }
 
-        public EndpointConfig getProducerEndpointConfig(String name) { return producers.get(name); }
+        public EndpointConfig getQueueWriterEndpointConfig(String name) { return queueWriters.get(name); }
 
-        public void setProducers(Map<String, EndpointConfig> producers) { this.producers = producers; }
+        public void setQueueWriters(Map<String, EndpointConfig> queueWriters) { this.queueWriters = queueWriters; }
     }
 
     public static class ConsumerConfig {

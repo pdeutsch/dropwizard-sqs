@@ -5,7 +5,7 @@ import com.amazonaws.services.sqs.model.SendMessageResult;
 
 import java.util.Map;
 
-public interface Producer {
+public interface QueueWriter {
     SendMessageResult sendMessage(String messageBody);
 
     SendMessageResult sendMessage(String messageBody, Integer delaySeconds);

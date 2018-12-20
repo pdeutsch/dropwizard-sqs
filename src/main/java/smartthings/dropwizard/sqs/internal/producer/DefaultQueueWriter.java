@@ -5,19 +5,19 @@ import com.amazonaws.services.sqs.model.MessageAttributeValue;
 import com.amazonaws.services.sqs.model.SendMessageRequest;
 import com.amazonaws.services.sqs.model.SendMessageResult;
 import com.google.inject.Inject;
-import smartthings.dropwizard.sqs.Producer;
+import smartthings.dropwizard.sqs.QueueWriter;
 
 import java.util.Map;
 
 /**
- * A Producer that can write a message to one queue, with an optional delay.
+ * A QueueWriter that can write a message to one queue, with an optional delay.
  */
-public class DefaultProducer implements Producer {
+public class DefaultQueueWriter implements QueueWriter {
     private final String queueUrl;
     private final AmazonSQS sqs;
 
     @Inject
-    public DefaultProducer(String queueUrl, AmazonSQS sqs) {
+    public DefaultQueueWriter(String queueUrl, AmazonSQS sqs) {
         this.queueUrl = queueUrl;
         this.sqs = sqs;
     }

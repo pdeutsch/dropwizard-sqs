@@ -91,8 +91,8 @@ class ConsumerFunctionalSpec extends Specification {
                         ]
                     )
                 ],
-                producers: [
-                    'producer1': new SqsModule.EndpointConfig(
+                queueWriters: [
+                    'queueWriter1': new SqsModule.EndpointConfig(
                         queueName: 'simple_test_queue',
                         regionName: 'us-east-1',
                         endpoint: awsEndpointUrl)
@@ -122,13 +122,13 @@ class ConsumerFunctionalSpec extends Specification {
     }
 
     // this test will use a simple queue publish, not using SNS
-    void 'it should publish and consume a message using Producer'() {
+    void 'it should publish and consume a message using QueueWriter'() {
         given:
         PollingConditions conditions = new PollingConditions()
         TestMessage request = new TestMessage(message: UUID.randomUUID())
 
         when:
-        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/producerPublish")
+        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/queueWriter")
                 .setHeader('Accept', 'application/json')
                 .setHeader('Content-Type', 'application/json')
                 .setBody(objectMapper.writeValueAsString(request))
@@ -144,13 +144,13 @@ class ConsumerFunctionalSpec extends Specification {
 
     // this test will use a simple queue publish with delay, not using SNS
     // note that it does not appear that pafortin/goaws docker container implements the delay feature
-    void 'it should publish and consume a message using Producer with delay'() {
+    void 'it should publish and consume a message using QueueWriter with delay'() {
         given:
         PollingConditions conditions = new PollingConditions(timeout: 10)
         TestMessage request = new TestMessage(message: UUID.randomUUID())
 
         when:
-        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/producerPublishDelay")
+        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/queueWriterDelay")
                 .setHeader('Accept', 'application/json')
                 .setHeader('Content-Type', 'application/json')
                 .setBody(objectMapper.writeValueAsString(request))
@@ -165,13 +165,13 @@ class ConsumerFunctionalSpec extends Specification {
     }
 
     // this test will use a simple queue publish with MessageAttributes, not using SNS
-    void 'it should publish and consume a message using Producer with attributes'() {
+    void 'it should publish and consume a message using QueueWriter with attributes'() {
         given:
         PollingConditions conditions = new PollingConditions()
         TestMessage request = new TestMessage(message: UUID.randomUUID())
 
         when:
-        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/producerPublishAttributes")
+        Response response = client.preparePost("http://localhost:${app.getLocalPort()}/queueWriterAttributes")
                 .setHeader('Accept', 'application/json')
                 .setHeader('Content-Type', 'application/json')
                 .setBody(objectMapper.writeValueAsString(request))
@@ -377,27 +377,27 @@ class TestScopeResource implements WebResource {
     }
 
     @POST
-    @Path('/producerPublish')
-    SendMessageResult methodProducerPublish(TestMessage request) {
-        Producer producer = sqsManager.getProducer('producer1')
-        return producer.sendMessage(objectMapper.writeValueAsString(request))
+    @Path('/queueWriter')
+    SendMessageResult methodQueueWriter(TestMessage request) {
+        QueueWriter queueWriter = sqsManager.getQueueWriter('queueWriter1')
+        return queueWriter.sendMessage(objectMapper.writeValueAsString(request))
     }
 
     @POST
-    @Path('/producerPublishDelay')
-    SendMessageResult methodProducerPublishDelay(TestMessage request) {
-        Producer producer = sqsManager.getProducer('producer1')
-        return producer.sendMessage(objectMapper.writeValueAsString(request), 5)
+    @Path('/queueWriterDelay')
+    SendMessageResult methodQueueWriterDelay(TestMessage request) {
+        QueueWriter queueWriter = sqsManager.getQueueWriter('queueWriter1')
+        return queueWriter.sendMessage(objectMapper.writeValueAsString(request), 5)
     }
 
     @POST
-    @Path('/producerPublishAttributes')
-    SendMessageResult methodProducerPublishAttributes(TestMessage request) {
-        Producer producer = sqsManager.getProducer('producer1')
+    @Path('/queueWriterAttributes')
+    SendMessageResult methodQueueWriterAttributes(TestMessage request) {
+        QueueWriter queueWriter = sqsManager.getQueueWriter('queueWriter1')
         Map<String, MessageAttributeValue> attributeValueMap = new HashMap<>();
         attributeValueMap.put("testAttr",
                 new MessageAttributeValue().withDataType("String").withStringValue("test value"));
-        return producer.sendMessage(objectMapper.writeValueAsString(request), null, attributeValueMap)
+        return queueWriter.sendMessage(objectMapper.writeValueAsString(request), null, attributeValueMap)
     }
 
     @POST

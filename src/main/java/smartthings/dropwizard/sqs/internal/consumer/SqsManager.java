@@ -7,7 +7,7 @@ import io.dropwizard.lifecycle.Managed;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import smartthings.dropwizard.sqs.*;
-import smartthings.dropwizard.sqs.internal.producer.DefaultProducer;
+import smartthings.dropwizard.sqs.internal.producer.DefaultQueueWriter;
 
 import java.util.Collection;
 import java.util.Map;
@@ -19,7 +19,7 @@ public class SqsManager implements Managed {
     private static final Logger LOG = LoggerFactory.getLogger(SqsManager.class);
 
     private final Map<String, SqsService> sqsConsumerMap = new ConcurrentHashMap<>();
-    private final Map<String, Producer> sqsProducerMap = new ConcurrentHashMap<>();
+    private final Map<String, QueueWriter> sqsQueueWriterMap = new ConcurrentHashMap<>();
     private final SqsModule.Config config;
     private final AmazonSQSProvider sqsProvider;
 
@@ -39,10 +39,10 @@ public class SqsManager implements Managed {
                     .flatMap(Collection::stream)
                     .forEach(this::createConsumer);
 
-            config.getProducers().entrySet().stream()
+            config.getQueueWriters().entrySet().stream()
                     .forEach(entry -> {
                         // reuse service if it already exists
-                        String producerName = entry.getKey();
+                        String queueWriterName = entry.getKey();
                         SqsModule.EndpointConfig endpointConfig = entry.getValue();
                         String consumerKey = getCacheKey(endpointConfig);
                         SqsService service = sqsConsumerMap.containsKey(consumerKey) ?
@@ -50,8 +50,8 @@ public class SqsManager implements Managed {
                                 createService(entry.getValue());
                         if (service != null) {
                             GetQueueUrlResult result = service.getQueueUrl(endpointConfig.getQueueName());
-                            sqsProducerMap.put(producerName,
-                                    new DefaultProducer(result.getQueueUrl(), sqsProvider.get(endpointConfig)));
+                            sqsQueueWriterMap.put(queueWriterName,
+                                    new DefaultQueueWriter(result.getQueueUrl(), sqsProvider.get(endpointConfig)));
                         }
                     });
         } else {
@@ -64,13 +64,13 @@ public class SqsManager implements Managed {
         LOG.debug("Shutting down SqsManager...");
     }
 
-    public Producer getProducer(String producerEndpointName) {
-        Producer producer = sqsProducerMap.get(producerEndpointName);
-        if (producer == null) {
-            LOG.error("No SQS Producer exists for name={}", producerEndpointName);
-            throw new IllegalStateException("Unable to resolve SQS Producer for name: " + producerEndpointName);
+    public QueueWriter getQueueWriter(String queueWriterEndpointName) {
+        QueueWriter queueWriter = sqsQueueWriterMap.get(queueWriterEndpointName);
+        if (queueWriter == null) {
+            LOG.error("No SQS QueueWriter exists for name={}", queueWriterEndpointName);
+            throw new IllegalStateException("Unable to resolve SQS QueueWriter for name: " + queueWriterEndpointName);
         }
-        return producer;
+        return queueWriter;
     }
 
     public SqsService get(SqsModule.EndpointConfig config) {
@@ -85,7 +85,7 @@ public class SqsManager implements Managed {
         return sqs;
     }
 
-    private SqsService createProducer(SqsModule.EndpointConfig config) {
+    private SqsService createQueueWriter(SqsModule.EndpointConfig config) {
         return null;
     }
 
